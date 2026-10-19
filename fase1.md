@@ -187,3 +187,44 @@ Justificativa:
 - A densidade aqui definida (concorrência instantânea / área do convex hull) não é diretamente comparável à densidade agregada reportada no artigo-base (Tabela 2, "Density (veh/km²)" para o dataset πNEUMA como um todo) — bases de cálculo diferentes (região individual vs. dataset inteiro; metodologia de área não detalhada no artigo).
 - A área de cada região é estimada via convex hull dos pontos de entrada/saída de veículos, não uma área oficialmente publicada por drone (não há essa granularidade nas fontes oficiais do πNEUMA consultadas) — é uma aproximação da região realmente coberta pelo tráfego observado, não da área de voo do drone.
 - Este é um perfil grosseiro por região inteira, não a densidade por tile (Eq. 1) que será formalizada na Fase 2.
+
+## Item 3 — Replicação do Pipeline de Construção do Grafo Geotemporal
+
+### 1. Objetivo
+
+Replicar, como baseline técnico, a construção do grafo geotemporal $\mathcal{G} = (\mathcal{G}(t))_{t \in \mathcal{T}_{time}}$ definida no artigo-base (Seção 2.1, Definição 1): tiling H3 do espaço, conjunto de tiles ocupados $O_t$ a cada instante (Eq. 1) e arestas entre tiles ocupados a distância em saltos $\leq \theta$. Este item cobre apenas a *construção* do grafo (Seção 3 do artigo); a formalização precisa das métricas sobre ele (grau agregado, alcançabilidade, estabilidade temporal) fica para a Fase 2, conforme o plano de trabalho.
+
+### 2. Redesenho em relação ao pipeline do artigo anterior
+
+O pipeline anterior (não recuperável) usava DuckDB para persistir a trajetória bruta por região `(track_id, lat, lon, time)`, calculando o H3 por cima disso. Redesenhado aqui com dois princípios:
+
+1. **O único artefato persistido é a série de tiles ocupados, não a trajetória nem o grafo.** Cada amostra já é mapeada para seu tile H3 no momento da ingestão; o resultado gravado é uma tabela longa `(t, h3, n_vehicles)` por arquivo — isso *é* $O_t$ materializado (Eq. 1), com a contagem de veículos por tile como subproduto (útil para a densidade por tile da Fase 2, sem precisar reprocessar os CSVs brutos).
+2. **O grafo $\mathcal{G}(t)$ nunca é persistido.** Vértices e arestas (Definição 1) são função pura de $O_t$: dado o conjunto de tiles ocupados em um instante, as arestas são derivadas sob demanda com `h3.grid_disk(tile, θ)` intersectado com o conjunto ocupado — O(|O_t|) por instante, sem armazenar uma explosão combinatória de arestas.
+
+**Armazenamento**: Parquet como formato de arquivo (colunar, tipado, comprimido, particionado por `region/date/window`), com DuckDB usado apenas como motor de consulta SQL sobre esses arquivos (sem banco `.duckdb` persistido) — ver comparação de formatos e decisão em conversa de projeto.
+
+### 3. Parâmetros replicados do artigo-base
+
+- **Resolução H3**: 11 (a mesma usada no artigo para o πNEUMA).
+- **Limiar de distância em saltos θ**: derivado como `floor(alcance_de_comunicação_m / comprimento_médio_de_aresta_h3_m)` — a mesma definição operacional do artigo (Seção 3), que usa o comprimento de aresta do hexágono como proxy da distância entre tiles adjacentes. Com alcance de 50 m e comprimento médio de aresta ≈28.66 m na resolução 11 (biblioteca `h3-py` 4.5.0; o artigo reporta ≈28.87 m), o resultado é **θ=1**, reproduzindo fielmente o valor relatado no artigo.
+- **Amostragem**: reamostragem de ~25Hz (nativo) para 1Hz, mesma resolução temporal usada no artigo-base para o πNEUMA (mesma justificativa do Item 2: deslocamento lento o suficiente no pico matinal para que 1Hz não perca eventos de conectividade relevantes).
+
+### 4. Escopo processado
+
+Apenas as duas regiões selecionadas no Item 2 — **d1** (baixa densidade) e **d7** (alta densidade) — nas 4 datas × 4 janelas disponíveis (32 arquivos, ~7.1 GB de CSV bruto). As demais 8 regiões ficam para a Fase 3, que expande a construção para todas as configurações do plano.
+
+### 5. Resultado e checagem de sanidade
+
+- Pipeline processou os 32 arquivos em ~247s (~4 min), gerando ~6.3M amostras (track, tile, segundo) reduzidas a `processed/geograph/region=*/date=*/window=*/occupied_tiles.parquet`, **1.2 MB no total** (vs. 7.1 GB de entrada) — confirma que persistir apenas $O_t$ em vez da trajetória bruta é adequado ao volume de dados do projeto.
+- Checagem de sanidade automática ao fim do pipeline: carrega $O_t$ de um instante de exemplo processado e reconstrói $\mathcal{G}(t)$ sob demanda (ex.: região d7, 2018-10-29, janela 09:00–09:30, t=938s → 47 tiles ocupados, 97 arestas com θ=1), validando que a construção segue a Definição 1 do artigo de ponta a ponta.
+
+### 6. Reprodutibilidade
+
+- Código: `src/geograph/` (`trajectory.py`, `tiling.py`, `pipeline.py`).
+- Execução: `PYTHONPATH=src uv run python -m geograph` (a partir da raiz do repositório; ~4 min para os 32 arquivos de d1+d7).
+- Saída: `processed/geograph/` (Parquet particionado por região/data/janela, fora do controle de versão — ver `.gitignore`).
+
+### 7. Limitações
+
+- $\theta=1$ reproduz o valor do artigo-base, mas herda sua imprecisão conceitual: o artigo usa o comprimento de aresta do hexágono como proxy da distância centro-a-centro entre tiles adjacentes, quando a distância centro-a-centro real medida entre tiles vizinhos na resolução 11 é maior (≈53,5 m, medida empiricamente com `h3.great_circle_distance`) — usar essa distância real resultaria em θ=0 (nenhum tile conectado a outro). Replicado aqui como no artigo, propositalmente, por ser o objetivo deste item (baseline técnico); um refinamento dessa derivação, se necessário, fica para a Fase 2.
+- A contagem de veículos por tile (`n_vehicles`) é agregada por segundo a partir de amostras já reamostradas a 1Hz; não preserva a identidade do veículo (`track_id`) entre tiles/instantes no artefato persistido — suficiente para o grafo geotemporal e para densidade por tile, mas não para métricas que dependam de rastrear um veículo específico ao longo do tempo (não previstas no plano atual).

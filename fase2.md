@@ -2,7 +2,7 @@
 
 > Fase 2 do plano de trabalho (`plan.md`): formalizar as métricas a serem usadas (densidade por tile, grau agregado do grafo geotemporal, alcançabilidade), definir a métrica de estabilidade temporal e as resoluções H3 a serem testadas. Entregável: documento de metodologia com todas as métricas formalmente definidas e justificadas.
 
-Este documento cobre os três bullets da fase. As decisões fechadas em discussão estão registradas na Seção 1.5 e nas Seções 2.6 e 3.2; os pontos ainda em aberto estão marcados como **[PENDENTE]** e sumarizados na Seção 4.
+Este documento cobre os três bullets da fase. As decisões fechadas estão registradas na Seção 1.5 e na tabela consolidada da Seção 4; os pontos em aberto (todos opcionais) estão listados na Seção 4.
 
 ## Notação
 
@@ -14,7 +14,9 @@ Segue o artigo-base [20]. Uma **observação** é uma tupla $o = (\text{região}
 
 $$(u,v) \in E_t \;\Longleftrightarrow\; u, v \in \mathcal{O}_t \;\wedge\; \mathrm{dist}_{\min}(u,v) \leq \rho$$
 
-onde $\mathrm{dist}_{\min}(u,v) = \min_{p\in u,\,q\in v} \|p-q\|_2$. O limiar efetivo em saltos $\theta_{eff}$ adapta-se à resolução para preservar o alcance físico por aresta $\approx \rho$ (tabela em Seção 3.2). Variante de fidelidade ao baseline: convenção do artigo-base (proxy de aresta $\theta=1$ na res. 11) preservada como configuração de replicação.
+onde $\mathrm{dist}_{\min}(u,v) = \min_{p\in u,\,q\in v} \|p-q\|_2$.
+
+Leitura do critério: trata-se de **contato possível** — o análogo do grafo de disco unitário (*range graph*) aplicado aos polígonos dos tiles, não de um enlace multi-hop. Se apenas $u$ e $v$ estiverem ocupados e houver um tile vazio entre eles, a conexão representa um salto de rádio **direto** atravessando o vazio (não um relé). O limiar efetivo em saltos $\theta_{eff}$ adapta-se à resolução para preservar o alcance físico por aresta $\approx \rho$ (tabela na Seção 3.1; discussão dos critérios alternativos na Seção 3.3). Variante de fidelidade ao baseline: convenção do artigo-base (proxy de aresta $\theta=1$ na res. 11), que coincide com o **colchete conservador** $\theta_{eff}-1$ nessa resolução — as duas configurações são rodadas em conjunto para delimitar o efeito dos enlaces marginais (Seção 3.3).
 
 $\mathcal{G}(t) = (V_t, E_t)$ o grafo estático no instante $t$ com $V_t = \mathcal{O}_t$ e arestas pelo critério acima; $\mathcal{R}_\delta$ o grafo de alcançabilidade time-aggregated com tolerância $\delta$.
 
@@ -135,21 +137,30 @@ Esta seção substitui a escolha arbitrária do artigo-base (valores 5–150 s c
 
 > **Consequência**: resultados condicionais a $\rho$; análise de sensibilidade opcional com $\rho \in \{25, 100\}\,\text{m}$ (Seção 2.6).
 
-### 2.3 Piso de quantização: regime sub-segundo não mensurável
+### 2.3 Tempo de travessia em conectividade perfeita ($\delta_{min}$)
 
-No modelo discreto, cada salto de jornada custa ≥ $\Delta t$ (causalidade: $t_{i+1} - t_i > 0$). Teto implícito de velocidade de propagação por aresta: $\approx \rho$ metros por $\Delta t$ (pelo critério geométrico, o alcance físico por passo é invariante à resolução). Com diâmetro regional $D \approx 520\,\text{m}$:
+No modelo discreto cada salto de jornada custa ≥ $\Delta t$ (causalidade: $t_{i+1} - t_i > 0$), e cada aresta cobre até $\theta_{eff}$ anéis — logo o deslocamento máximo por passo é $\theta_{eff}\cdot d_{\text{tile}} \gtrsim \rho$. Com diâmetro regional $D \approx 520\,\text{m}$:
 
-$$\delta_{min} = \frac{D}{\rho}\cdot\Delta t \approx \frac{520}{50}\cdot 1\,\text{s} \approx 10\,\text{s} \quad (\textbf{invariante entre resoluções})$$
+$$\delta_{min} = \frac{D}{\theta_{eff}\cdot d_{\text{tile}}}\cdot\Delta t \approx \frac{D}{\rho}\cdot\Delta t \in [5,\,10]\,\text{s}$$
 
-Mesmo conectividade instantânea perfeita aparece como jornada de ~10 s. $\delta < \delta_{min}$ mede artefato de discretização — fora da análise. Delimita domínio de validade: regime de rádio puro (3–100 ms, Seção 2.1) está **fora** — coerente com propósito region-centric (disseminação multi-hop, não balizas single-hop).
+Este é o **tempo mínimo de travessia da região em conectividade perfeita** — o instante em que $r_\delta(u)$ atinge o platô para uma rede idealmente conectada com aquela resolução ($\approx 5$ s com $\theta_{eff}=2$; $\approx 10$ s com $\theta_{eff}=1$).
 
-Refinamentos Fase 3 (opcionais): (i) $D_{hop}$ do subgrafo ocupado por observação — piso efetivo varia com densidade (maior em d1); (ii) $\delta_{gap}$ empírico (mediana de fechamento de lacuna) via trajetórias brutas com `track_id`.
+**Interpretação dos dois lados do limiar** (correção de um enquadramento anterior deste documento, que tratava $\delta < \delta_{min}$ como artefato a excluir):
+
+- $\delta \geq \delta_{min}$: o orçamento temporal excede o necessário para atravessar a região conectada → a métrica lê **tolerância de atraso** no sentido físico habitual.
+- $1\,\text{s} \leq \delta < \delta_{min}$: a jornada é limitada por **orçamento de saltos** ($k = \delta/\Delta t$) → a métrica lê **profundidade de conectividade temporal**: quão fragmentada é a rede e quantas pontes a mobilidade precisa fornecer. É quantidade estrutural legítima, e é justamente o trecho da curva em que d1 e d7 — e dias distintos de uma mesma região — mais se discriminam.
+- $\delta < 1\,\text{s}$: impossível sequer um salto — fora do modelo.
+
+O efeito de discretização é *common-mode* entre observações da mesma região (mesma geometria, mesmo $\Delta t$), portanto não enviesa as comparações de estabilidade (S1–S3). Além disso o modelo **subestima** a entrega rápida (o rádio real é praticamente instantâneo, enquanto o modelo cobra $\Delta t$ por salto) — a inclusão da faixa $\delta < \delta_{min}$ é, nessa direção, conservadora. O regime de rádio puro dos padrões (3–100 ms, Seção 2.1) permanece **fora** do alcance do modelo, coerente com o propósito region-centric (disseminação multi-hop, não balizas single-hop).
+
+Refinamentos Fase 3 (opcionais): (i) $D$ e $\theta_{eff}$ do subgrafo *ocupado* por observação — o limiar efetivo varia com a densidade (maior em d1); (ii) $\delta_{gap}$ empírico (mediana de fechamento de lacuna) via trajetórias brutas com `track_id`.
 
 ### 2.4 Os três regimes de propagação
 
 | Regime | $\delta$ | Mecanismo | Status |
 | --- | --- | --- | --- |
-| Rádio puro | < 1 s (padrões: 3–100 ms) | Eletromagnético multi-hop | Não mensurável ($\delta_{min} \approx 10$ s) |
+| Rádio puro | < 1 s (padrões: 3–100 ms) | Eletromagnético multi-hop | Abaixo do passo de discretização — fora do alcance do modelo |
+| Orçamento de saltos | 1 s – $\delta_{min}$ (~5–10 s) | Conectividade parcial em poucos saltos | Mensurável como métrica **estrutural** (fragmentação), não como atraso físico |
 | **Misto** | **~10–60 s** | Difusão multi-hop + pontes store-carry | **Interesse** — estrutura espacial discrimina |
 | Mobilidade pura (DTN) | ≳ 100–200 s | Carregar-e-repassar | Satura; ponto de referência |
 
@@ -157,9 +168,11 @@ No regime misto a mensagem avança por rádio quando há conectividade e atraves
 
 ### 2.5 Decisões operacionais para $\delta$
 
-**(a) Grade:** $\delta \in \{10,\, 30,\, 60,\, 120,\, 300\}\,\text{s}$ — absolutos (decisão 2). Interpretação: piso de quantização (controle negativo), centro do regime misto, limite do regime misto, entrada do DTN, referência quasi-DTN (saturação). Teto: $\delta \leq |\mathcal{T}_o|/2$ (≥ ~300 partidas válidas para $c(u,v)$).
+**(a) Grade:** $\delta \in \{5,\, 10,\, 15,\, 20,\, 30,\, 45,\, 60,\, 120,\, 300\}\,\text{s}$ — valores absolutos (decisão 2), com amostragem fina no regime misto e leitura em dois regimes semânticos (Seção 2.3): $\delta < \delta_{min}$ = cobertura por orçamento de saltos; $\delta \geq \delta_{min}$ = tolerância de atraso. Piso absoluto: $\delta \geq 1$ s. Teto: $\delta \leq |\mathcal{T}_o|/2$ (≥ ~300 partidas válidas para $c(u,v)$).
 
-**(b) $\delta$ primário = 30 s** para comparações principais (S1–S3), curva completa como sensibilidade. Centro do regime misto, equidistante do piso e saturação; ranking de tiles robusto nessa faixa (artigo-base).
+**(b) Granularidade é escolha de reporte, não de custo:** o custo dominante do cálculo é a malha $|\mathcal{V}|^2$ de pares fonte-alvo, não o número de valores de $\delta$ — a curva completa $r_\delta(u)$ decorre dos tempos de chegada mais cedo por par (perfil temporal) e $c(u,v;\delta)$ é um limiar sobre esse perfil. A Fase 3 valida o custo real.
+
+**(c) $\delta$ primário = 30 s** para comparações principais (S1–S3), curva completa como sensibilidade. Centro do regime misto; ranking de tiles robusto nessa faixa (artigo-base).
 
 ### 2.6 Acoplamento $\Delta t$–$\delta$–$\rho$ e sensibilidade
 
@@ -179,26 +192,54 @@ Alcance físico fixo $\rho = 50\,\text{m}$ → limiar efetivo $\theta_{eff}$ ada
 
 | Resolução | $d_{\text{tile}}$ (centro) | $\theta_{eff}$ esperado | Viabilidade |
 | --- | ---: | ---: | --- |
-| 10 | ~142 m | 0 (nem adjacentes conectam) | Inviável |
+| 10 | ~142 m | 1 (só adjacentes; anel 2 a ~114 m > $\rho$) | Inviável por **granularidade**: ~12 tiles/região (2–3 de diâmetro) |
 | 11 | ~53,5 m | 1–2 (fronteira 49,6 m vs. 50 m) | **Baseline** (comparabilidade com artigo-base) |
 | 12 | ~20 m | 3–4 | **Viável**; custo ~7× tiles |
 
-**Consequência do critério (C):** invariância do alcance por passo ($\approx\rho$) → $\delta_{min} \approx 10\,\text{s}$ invariante → comparação entre resoluções mede granularidade espacial, não física de conexão diferente. Convenção do artigo-base (proxy de aresta $\theta=1$ na res. 11) preservada como variante de replicação para quantificar diferença.
+**Consequência do critério (C):** a escala de conexão *estática* fica ancorada em $\rho$ (vizinhança ≈ alcance físico, independente da resolução) → $\delta_{min}$ varia pouco entre resoluções (~5–10 s, Seção 2.3) → a comparação entre resoluções mede granularidade espacial, não uma física de conexão diferente. Convenção do artigo-base (proxy de aresta $\theta=1$ na res. 11) preservada como variante de replicação para quantificar a diferença.
 
-Alternativa descartada ({10, 11}): exigiria $\rho \gtrsim 150\,\text{m}$ na res. 10, quebrando ancoragem física e comparabilidade.
+Alternativa descartada ({10, 11}): **não por inviabilidade de $\theta$** — sob o critério geométrico a res. 10 é conectável com $\theta_{eff}=1$, pois tiles adjacentes compartilham aresta (distância mínima 0) — mas por **granularidade insuficiente**: a área de ~0,137 km² cabe em ~12 tiles da res. 10, isto é 2–3 tiles de diâmetro, sem estrutura espacial a analisar e com grafo trivialmente atravessável ($\delta_{min} \approx 4$ s).
 
 ### 3.2 Caso de fronteira na res. 11 (sensibilidade explícita)
 
-Distância mínima entre tiles do anel 2 ≈ largura do hexágono intermediário ≈ $\sqrt{3}\,\ell_{\text{aresta}} \approx 49{,}6\,\text{m} \lessapprox \rho = 50\,\text{m}$. Hexágonos H3 não são perfeitamente regulares (distorção icosaédrica) → valor exato decidido empiricamente pela tabela pré-computada. Se $\theta_{eff}=2$ na res. 11, o artigo-base subestima conectividade — diferença documentada como resultado metodológico.
+Distância mínima entre tiles do anel 2 ≈ largura do hexágono intermediário ≈ $\sqrt{3}\,\ell_{\text{aresta}} \approx 49{,}6\,\text{m} \lessapprox \rho = 50\,\text{m}$. Hexágonos H3 não são perfeitamente regulares (distorção icosaédrica) → o valor exato é decidido empiricamente pela tabela pré-computada. Se $\theta_{eff}=2$ na res. 11, o artigo-base **subestima** conectividade nesse anel; a diferença é documentada como resultado metodológico.
+
+### 3.3 Por que o critério geométrico, e não centro-a-centro
+
+Comparação das convenções possíveis na res. 11 ($\rho = 50\,\text{m}$, $d_{\text{tile}} \approx 53{,}5\,\text{m}$):
+
+| Critério | $\theta$ | Consequência |
+| --- | ---: | --- |
+| Centro-a-centro ($d_{\text{tile}} > \rho$) | 0 | Nenhuma aresta — o modelo colapsa (não é "subestimar", é aniquilar) |
+| Conservador estrito ($\mathrm{dist}_{\max} \leq \rho$) | 0 | Cantos opostos de tiles adjacentes distam $2\ell \approx 57{,}3\,\text{m} > \rho$ → também colapsa |
+| Adjacência (proxy do artigo, $\theta=1$) | 1 | Conecta adjacentes cujos ocupantes podem estar a 57,3 m (fora de alcance) **e** omite pares a 2 anéis que estão a 49,6 m (em alcance) |
+| **Existencial (adotado)** | 1–2 | Liga todo par com ocupantes potencialmente em alcance |
+
+Argumento central: **não existe critério conservador viável nesta granularidade**. Todo $\theta$ fixo sobre- e subestima simultaneamente, porque a abstração descarta a posição intra-tile; o proxy do artigo não é conservador — é apenas diferente, e erra nas duas direções. O critério existencial é o único que (i) mantém o modelo vivo, (ii) tem leitura física limpa — "os ocupantes destes tiles **podem** se comunicar", o modelo padrão de grafo de disco unitário — e (iii) fixa a escala de conexão em $\rho$, tornando a comparação entre resoluções significativa.
+
+Seu viés é **otimista**: pares a 2 anéis cujos ocupantes estão tipicamente a ~107 m entram como conectados, e esse viés cresce com resolução mais fina (na res. 12, $\theta_{eff} \approx 4$ liga pares com distância típica de ~80 m).
+
+**Mitigação**: rodar em conjunto $\theta_{eff}$ (existencial) e $\theta_{eff}-1$ (na res. 11 = $\theta=1$, exatamente a convenção do artigo-base). As duas configurações delimitam o efeito dos enlaces marginais: se $r_\delta$ e as métricas de estabilidade diferirem pouco entre elas, a fronteira 49,6 m vs. 50 m é imaterial; se diferirem, a diferença é ela mesma um resultado a reportar. O bracketing cobre também a sensibilidade a $\rho$ (Seção 2.6).
 
 ---
 
-## 4. Pontos em aberto (para fechamento em discussão)
+## 4. Decisões fechadas e pontos em aberto
 
-1. **Item 2.5** (ainda pendente): grade reduzida $\{10, 60, 300\}\,\text{s}$ vs. $\{10, 30, 60, 120, 300\}\,\text{s}$ (custo Fase 3); estimativa empírica opcional de $\delta_{gap}$.
-2. Sensibilidade ao limiar de atividade (10%) — verificação na Fase 4.
+**Consolidação das decisões de parâmetros** (além das seis da Seção 1.5):
 
-Após fechamento do item 1 acima, este documento constitui o entregável da Fase 2.
+| # | Parâmetro / decisão | Escolha |
+| --- | --- | --- |
+| 7 | Alcance físico $\rho$ | 50 m, justificado em três camadas (Seção 2.2) |
+| 8 | Critério de conexão | Geométrico existencial ($\mathrm{dist}_{\min} \leq \rho$), com bracketing $\theta_{eff}-1$ (Seção 3.3) |
+| 9 | $\Delta t$ | 1 s, fixo em todas as configurações (Seção 2.6) |
+| 10 | Grade de $\delta$ | $\{5, 10, 15, 20, 30, 45, 60, 120, 300\}$ s; $\delta^* = 30$ s; piso 1 s; teto $\lvert\mathcal{T}_o\rvert/2$ (Seção 2.5) |
+| 11 | Resoluções H3 | {11, 12} (Seção 3.1) |
+
+**Pontos em aberto** (todos opcionais — não bloqueiam o entregável):
+
+1. Estimativa empírica de $\delta_{gap}$ na Fase 3 (reprocessamento parcial dos CSVs preservando `track_id`).
+2. Sensibilidade ao limiar de atividade (10%, Seção 1.4) — verificação na Fase 4.
+3. Sensibilidade de $\rho$ ($\{25, 100\}$ m em configuração reduzida), condicionada ao orçamento da Fase 3.
 
 ## Referências
 
